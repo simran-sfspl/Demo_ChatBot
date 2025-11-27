@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>n8n Full-Page Chat (Messenger Style)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Markdown renderer -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    :root{
+      --bg-1:#0f172a;        /* slate-900 */
+      --bg-2:#111827;        /* gray-900 */
+      --panel:#0b1222;       /* dark glass */
+      --accent:#2563eb;      /* blue-600 */
+      --accent-2:#60a5fa;    /* blue-400 */
+      --text:#e5e7eb;        /* gray-200 */
+      --muted:#94a3b8;       /* slate-400 */
+      --bot:#111827;         /* bot bubble bg (dark) */
+      --user:#2563eb;        /* user bubble bg */
+      --radius:22px;
+      --shadow:0 10px 30px rgba(0,0,0,.35);
+
+      /* dynamic height of fixed composer; JS updates this */
+      --composer-h: 96px;
+    }
+    html,body{height:100%;}
+    body{
+      margin:0; font-family: ui-sans-serif, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Segoe UI", sans-serif;
+      color:var(--text);
+      background: radial-gradient(1200px 700px at 10% -10%, #1e293b 0%, transparent 60%),
+                  radial-gradient(1000px 600px at 110% 10%, #0b264e 0%, transparent 55%),
+                  linear-gradient(180deg, var(--bg-1), var(--bg-2));
+      display:flex; flex-direction:column;
+      min-height:100vh;
+    }
+
+    /* Header */
+    .app-header{
+      position:sticky; top:0; z-index:10;
+      backdrop-filter: blur(10px);
+      background: linear-gradient(180deg, rgba(2,6,23,.85), rgba(2,6,23,.65));
+      border-bottom:1px solid rgba(148,163,184,.15);
+      display:flex; align-items:center; justify-content:space-between;
+      padding:14px 18px;
+    }
+    .brand{display:flex; align-items:center; gap:12px;}
+    .logo{width:36px; height:36px; border-radius:12px; background:var(--accent);
+      display:grid; place-items:center; font-weight:700; color:#fff; box-shadow: var(--shadow);}
+    .title{font-size:16px; font-weight:600;}
+    .status{font-size:12px; color:var(--muted)}
+    .header-ops{display:flex; align-items:center; gap:8px;}
+    .chip{
+      font-size:12px; color:#fff; background:rgba(37,99,235,.15); border:1px solid rgba(96,165,250,.45);
+      padding:6px 10px; border-radius:999px;
+    }
+    .btn{
+      border:1px solid rgba(148,163,184,.25);
+      background:rgba(2,6,23,.5);
+      color:var(--text); font-size:12px; padding:6px 10px; border-radius:999px; cursor:pointer;
+    }
+    .btn:hover{background:rgba(148,163,184,.1);}
+
+    /* Main layout */
+    .container{
+      flex:1; display:block; width:100%;
+      max-width:1100px; margin:0 auto;
+    }
+    .messages{
+      padding:18px;
+      padding-bottom: calc(var(--composer-h) + 18px + env(safe-area-inset-bottom));
+      overflow-y:auto; scroll-behavior:smooth;
+      display:flex; flex-direction:column; gap:10px;
+      min-height: 60vh; /* gives body some height even with few messages */
+    }
+
+    /* Message row */
+    .row{display:flex; gap:10px; align-items:flex-end; max-width:100%;}
+    .row.bot{justify-content:flex-start;}
+    .row.user{justify-content:flex-end;}
+    .avatar{
+      width:32px; height:32px; border-radius:12px; flex:0 0 32px;
+      background:#0a0a0a; overflow:hidden; display:grid; place-items:center; border:1px solid rgba(148,163,184,.15);
+    }
+    .avatar img{width:100%; height:100%; object-fit:cover;}
+
+    /* Speech balloons with tails */
+    .bubble{
+      position:relative; padding:12px 14px; max-width:min(85%, 780px);
+      border-radius: var(--radius);
+      line-height:1.45; word-wrap:break-word; white-space:pre-wrap;
+      box-shadow: 0 6px 18px rgba(0,0,0,.25);
+      border:1px solid rgba(148,163,184,.15);
+    }
+    .bubble.bot{
+      background: var(--bot);
+      color: var(--text);
+      border-top-left-radius: 10px;
+    }
+    .bubble.user{
+      background: var(--user);
+      color:#fff;
+      border-top-right-radius: 10px;
+    }
+    /* tails */
+    .bubble.bot:after{
+      content:""; position:absolute; left:-7px; bottom:10px;
+      width:0; height:0; border:10px solid transparent; border-right-color: var(--bot); border-left:0; border-bottom:0;
+      filter: drop-shadow(0 1px 0 rgba(0,0,0,.25));
+    }
+    .bubble.user:after{
+      content:""; position:absolute; right:-7px; bottom:10px;
+      width:0; height:0; border:10px solid transparent; border-left-color: var(--user); border-right:0; border-bottom:0;
+      filter: drop-shadow(0 1px 0 rgba(0,0,0,.25));
+    }
+
+    /* Markdown in bot bubble */
+    .bubble.bot h1,.bubble.bot h2,.bubble.bot h3{margin:.2em 0 .3em; font-weight:700;}
+    .bubble.bot p{margin:.2em 0;}
+    .bubble.bot code{background: rgba(148,163,184,.15); padding:2px 6px; border-radius:8px;}
+    .bubble.bot pre{background: rgba(2,6,23,.7); padding:12px; border-radius:12px; overflow:auto; border:1px solid rgba(148,163,184,.15);}
+    .meta{font-size:11px; color:var(--muted); margin-top:6px;}
+
+    /* Typing indicator */
+    .typing{display:inline-flex; gap:6px; align-items:center;}
+    .dot{width:6px; height:6px; border-radius:50%; background: #9aa4b2; opacity:.8; animation: bounce 1s infinite;}
+    .dot:nth-child(2){animation-delay:.15s;}
+    .dot:nth-child(3){animation-delay:.3s;}
+    @keyframes bounce{
+      0%,80%,100%{ transform: translateY(0); opacity:.7;}
+      40%{ transform: translateY(-5px); opacity:1;}
+    }
+
+    /* FIXED COMPOSER BAR */
+    .composer-bar{
+      position:fixed; left:0; right:0; bottom:0; z-index:20;
+      backdrop-filter: blur(10px);
+      background: linear-gradient(180deg, rgba(2,6,23,.85), rgba(2,6,23,.75));
+      border-top:1px solid rgba(148,163,184,.15);
+      padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+    }
+    .composer{
+      max-width:1100px; margin:0 auto;
+      display:flex; align-items:flex-end; gap:10px;
+    }
+    .input{
+      flex:1; display:flex; align-items:flex-end; gap:8px; background: rgba(2,6,23,.6);
+      border:1px solid rgba(148,163,184,.25); border-radius:16px; padding:8px 10px;
+      flex-wrap: wrap; /* allow previews to wrap above textarea */
+    }
+    textarea{
+      width:100%; max-height:160px; min-height:38px; resize:vertical;
+      border:none; outline:none; background:transparent; color:var(--text);
+      font-size:14px; line-height:1.4;
+    }
+    .send-btn{
+      border:none; outline:none; border-radius:14px; padding:10px 14px; cursor:pointer;
+      background:linear-gradient(180deg, var(--accent), #1d4ed8); color:#fff; font-weight:600;
+      box-shadow: 0 8px 18px rgba(37,99,235,.35);
+    }
+    .send-btn:disabled{opacity:.6; cursor:not-allowed; box-shadow:none;}
+
+    /* --- Attachment UX (minimal, inline) --- */
+    .attach-btn{
+      border:1px dashed rgba(148,163,184,.35);
+      background:rgba(2,6,23,.4);
+      color:var(--text); font-size:12px; padding:8px 10px; border-radius:12px; cursor:pointer;
+    }
+    .attach-btn:hover{background:rgba(148,163,184,.08);}
+    .previews{display:flex; gap:6px; width:100%; flex-wrap:wrap;}
+    .thumb{
+      position:relative; width:56px; height:56px; border-radius:10px; overflow:hidden;
+      border:1px solid rgba(148,163,184,.25); box-shadow: 0 4px 10px rgba(0,0,0,.25);
+    }
+    .thumb img{width:100%; height:100%; object-fit:cover;}
+    .thumb .x{
+      position:absolute; top:4px; right:4px; width:18px; height:18px; border-radius:999px;
+      background:rgba(0,0,0,.55); color:#fff; font-size:12px; line-height:18px; text-align:center; cursor:pointer;
+      border:1px solid rgba(255,255,255,.25);
+    }
+
+    /* Images inside bubbles */
+    .attachments-grid{
+      display:grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap:8px; margin-top:8px;
+    }
+    .attachments-grid img{
+      width:100%; height:120px; object-fit:cover; border-radius:12px; border:1px solid rgba(255,255,255,.2);
+    }
+
+    /* Responsive */
+    @media (max-width: 1024px){
+      .container{max-width: 900px;}
+    }
+    @media (max-width: 768px){
+      .container{max-width: 100%; }
+      .messages{padding:14px; padding-bottom: calc(var(--composer-h) + 14px + env(safe-area-inset-bottom));}
+      .logo{width:32px; height:32px;}
+    }
+    @media (max-width: 420px){
+      .send-btn{padding:10px 12px;}
+      .title{font-size:15px;}
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header class="app-header">
+    <div class="brand">
+      <div class="logo">AI</div>
+      <div>
+        <div class="title">Sampurna IT Copilot</div>
+        <div class="status" id="status">Ready</div>
+      </div>
+    </div>
+    <div class="header-ops">
+      <span class="chip">Session: <span id="session-chip"></span></span>
+      <button class="btn" id="btn-clear" title="Clear conversation">Clear</button>
+    </div>
+  </header>
+
+  <!-- Main -->
+  <div class="container">
+    <!-- Messages -->
+    <div id="chat-window" class="messages">
+      <!-- Welcome bot message -->
+      <div class="row bot">
+        <div class="avatar">
+          <img src="https://api.dicebear.com/8.x/identicon/svg?seed=n8n-bot" alt="bot"/>
+        </div>
+        <div class="bubble bot">
+          Sampurna TechDesk — Internal IT Assistant.
+          <div class="meta">Tip: Shift+Enter for a new line</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FIXED Composer (stays on screen while scrolling) -->
+  <div class="composer-bar" id="composer-bar">
+    <form id="chat-form" class="composer" onsubmit="sendChat(event)">
+      <div class="input">
+        <!-- Attachment previews -->
+        <div class="previews" id="previews"></div>
+        <!-- Hidden file input -->
+        <input id="file-input" type="file" accept="image/*" multiple style="display:none" />
+        <!-- Attach button -->
+        <button type="button" class="attach-btn" id="btn-attach" title="Attach images">Attach</button>
+        <textarea id="user-input" placeholder="Type your message…" required></textarea>
+      </div>
+      <button class="send-btn" id="btn-send" type="submit">Send</button>
+    </form>
+  </div>
+
+<script>
+  // ---------- CONFIG (keep your keys/variables the same) ----------
+  const WEBHOOK_URL = 'https://n8n.srv896137.hstgr.cloud/webhook/f2350316-ae43-4371-ae7a-ada8d3d1f502';
+  const PAYLOAD_KEY = 'chatInput';   // must stay as you requested
+  const SESSION_KEY = 'sessionId';   // must stay as you requested
+
+  // ---------- Session handling ----------
+  function getSessionId(){
+    let sid = localStorage.getItem('n8nSessionId');
+    if(!sid){
+      sid = 'session_' + Date.now() + '_' + Math.floor(Math.random()*100000);
+      localStorage.setItem('n8nSessionId', sid);
+    }
+    return sid;
+  }
+  const sessionId = getSessionId();
+
+  // ---------- DOM refs ----------
+  const chatWindow  = document.getElementById('chat-window');
+  const userInput   = document.getElementById('user-input');
+  const statusEl    = document.getElementById('status');
+  const sendBtn     = document.getElementById('btn-send');
+  const clearBtn    = document.getElementById('btn-clear');
+  const sessionChip = document.getElementById('session-chip');
+  const composerBar = document.getElementById('composer-bar');
+
+  // New refs (attachments)
+  const fileInput   = document.getElementById('file-input');
+  const attachBtn   = document.getElementById('btn-attach');
+  const previews    = document.getElementById('previews');
+
+  sessionChip.textContent = sessionId.slice(0, 10);
+
+  // ---------- Markdown config ----------
+  marked.setOptions({ breaks:true, gfm:true });
+
+  // ---------- Ensure messages never hide behind the fixed composer ----------
+  function updateComposerHeight(){
+    const h = composerBar.offsetHeight || 96;
+    document.documentElement.style.setProperty('--composer-h', h + 'px');
+  }
+  window.addEventListener('resize', updateComposerHeight);
+  window.addEventListener('orientationchange', updateComposerHeight);
+  document.addEventListener('DOMContentLoaded', updateComposerHeight);
+  // in case fonts load later
+  setTimeout(updateComposerHeight, 150);
+
+  // ---------- Attachments state ----------
+  const pendingFiles = []; // {name,type,dataURL,size}
+
+  function renderPreviews(){
+    previews.innerHTML = '';
+    pendingFiles.forEach((f, idx)=>{
+      const wrap = document.createElement('div');
+      wrap.className = 'thumb';
+      const img = document.createElement('img');
+      img.src = f.dataURL;
+      img.alt = f.name || 'image';
+      const x = document.createElement('div');
+      x.className = 'x';
+      x.textContent = '×';
+      x.title = 'Remove';
+      x.onclick = ()=>{
+        pendingFiles.splice(idx,1);
+        renderPreviews();
+        updateComposerHeight();
+      };
+      wrap.appendChild(img); wrap.appendChild(x);
+      previews.appendChild(wrap);
+    });
+  }
+
+  function addFiles(files){
+    const max = 8; // soft cap to avoid megabombs
+    const toAdd = Array.from(files || []).slice(0, Math.max(0, max - pendingFiles.length));
+    toAdd.forEach(file=>{
+      if(!file.type.startsWith('image/')) return;
+      const reader = new FileReader();
+      reader.onload = e=>{
+        pendingFiles.push({
+          name: file.name,
+          type: file.type,
+          size: file.size,
+          dataURL: e.target.result // data:image/...;base64,xxxx
+        });
+        renderPreviews();
+        updateComposerHeight();
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // Click-to-attach
+  attachBtn.addEventListener('click', ()=> fileInput.click());
+  fileInput.addEventListener('change', (e)=> addFiles(e.target.files));
+
+  // Paste-to-attach (screenshots)
+  window.addEventListener('paste', (e)=>{
+    const items = e.clipboardData?.items || [];
+    const blobs = [];
+    for(const it of items){
+      if(it.type && it.type.startsWith('image/')){
+        const blob = it.getAsFile();
+        if(blob) blobs.push(new File([blob], `pasted-${Date.now()}.png`, {type: blob.type || 'image/png'}));
+      }
+    }
+    if(blobs.length){ addFiles(blobs); }
+  });
+
+  // ---------- Rendering helpers ----------
+  function appendBubble(sender, text, isTyping=false, attachments=null){
+    const row = document.createElement('div');
+    row.className = `row ${sender}`;
+
+    // avatar
+    const avatar = document.createElement('div');
+    avatar.className = 'avatar';
+    const img = document.createElement('img');
+    img.alt = sender === 'bot' ? 'bot' : 'you';
+    img.src = sender === 'bot'
+      ? 'https://api.dicebear.com/8.x/identicon/svg?seed=n8n-bot'
+      : 'https://api.dicebear.com/8.x/personas/svg?seed=user';
+    avatar.appendChild(img);
+
+    // bubble
+    const bubble = buildBubble(sender, text, isTyping, attachments);
+
+    if(sender === 'user'){
+      row.appendChild(bubble);
+      row.appendChild(avatar);
+    }else{
+      row.appendChild(avatar);
+      row.appendChild(bubble);
+    }
+
+    chatWindow.appendChild(row);
+    chatWindow.scrollTop = chatWindow.scrollHeight;
+    return row;
+  }
+
+  function buildBubble(sender, text, isTyping, attachments){
+    const bubble = document.createElement('div');
+    bubble.className = `bubble ${sender}`;
+
+    if(isTyping){
+      bubble.innerHTML = `<span class="typing">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+      </span>`;
+      bubble.dataset.typing = '1';
+      return bubble;
+    }
+
+    if(sender === 'bot'){
+      bubble.innerHTML = marked.parse(text ?? '');
+    }else{
+      // user bubble: support text + image grid
+      const hasText = Boolean(text && String(text).trim().length);
+      if(hasText){
+        const p = document.createElement('div');
+        p.textContent = String(text ?? '');
+        bubble.appendChild(p);
+      }
+      if(Array.isArray(attachments) && attachments.length){
+        const grid = document.createElement('div');
+        grid.className = 'attachments-grid';
+        attachments.forEach(a=>{
+          const im = document.createElement('img');
+          im.src = a.dataURL || a.url || '';
+          im.alt = a.name || 'image';
+          grid.appendChild(im);
+        });
+        bubble.appendChild(grid);
+      }
+      if(!hasText && (!attachments || !attachments.length)){
+        bubble.textContent = '';
+      }
+    }
+    return bubble;
+  }
+
+  function replaceTyping(row, finalHTML){
+    if(!row) return;
+    const bubble = row.querySelector('.bubble');
+    if(bubble && bubble.dataset.typing === '1'){
+      bubble.dataset.typing = '0';
+      bubble.innerHTML = finalHTML;
+    }
+    chatWindow.scrollTop = chatWindow.scrollHeight;
+  }
+
+  function setStatus(s){ statusEl.textContent = s; }
+
+  // ---------- Clear conversation ----------
+  clearBtn.addEventListener('click', ()=>{
+    chatWindow.innerHTML = '';
+    const welcome = document.createElement('div');
+    welcome.className = 'row bot';
+    welcome.innerHTML = `
+      <div class="avatar">
+        <img src="https://api.dicebear.com/8.x/identicon/svg?seed=n8n-bot" alt="bot"/>
+      </div>
+      <div class="bubble bot">
+        Cleared. How can I help?
+        <div class="meta">Session: ${sessionId.slice(0,10)}</div>
+      </div>`;
+    chatWindow.appendChild(welcome);
+    // also clear pending attachments
+    pendingFiles.splice(0, pendingFiles.length);
+    renderPreviews();
+    userInput.focus();
+    updateComposerHeight();
+  });
+
+  // ---------- Input UX ----------
+  // Enter = send, Shift+Enter = newline
+  userInput.addEventListener('keydown', (e)=>{
+    if(e.key === 'Enter' && !e.shiftKey){
+      e.preventDefault();
+      document.getElementById('chat-form').dispatchEvent(new Event('submit'));
+    }
+  });
+
+  // Auto-resize textarea
+  userInput.addEventListener('input', ()=>{
+    userInput.style.height = 'auto';
+    userInput.style.height = Math.min(userInput.scrollHeight, 160) + 'px';
+    updateComposerHeight();
+  });
+
+  // ---------- Send message ----------
+  async function sendChat(e){
+    e.preventDefault();
+    const txt = userInput.value.trim();
+    const hasImages = pendingFiles.length > 0;
+    if(!txt && !hasImages) return; // nothing to send
+
+    // render user message with any attached images
+    appendBubble('user', txt, false, pendingFiles);
+
+    // reset input UI
+    userInput.value = '';
+    userInput.style.height = '38px';
+
+    // typing indicator
+    const typingRow = appendBubble('bot', '', true);
+    setStatus('Thinking…');
+    sendBtn.disabled = true;
+
+    // Build payload with your required keys + images[] (if any)
+    const payload = {
+      [PAYLOAD_KEY]: txt,
+      [SESSION_KEY]: sessionId
+    };
+    if(hasImages){
+      payload.images = pendingFiles.map(f=>({
+        name: f.name,
+        type: f.type,
+        data: f.dataURL  // data URL (base64)
+      }));
+    }
+
+    try{
+      const res = await fetch(WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const raw = await res.text();
+      let html;
+
+      if(!res.ok){
+        html = `<div>⚠️ HTTP ${res.status}</div><pre>${escapeHtml(raw)}</pre>`;
+      }else{
+        try{
+          const json = JSON.parse(raw);
+          const reply = json.reply ?? json.response ?? JSON.stringify(json);
+          html = marked.parse(String(reply));
+          if(Array.isArray(json.sources) && json.sources.length){
+            html += `\n\n<hr style="opacity:.15" />\n<div class="meta"><strong>Sources</strong><br/>` +
+              json.sources.map((s,i)=>`${i+1}. ${s.url ? `<a href="${escapeAttr(s.url)}" target="_blank" rel="noopener">${escapeHtml(s.title||s.url)}</a>` : escapeHtml(s.title||'Source')}`).join('<br/>')
+              + `</div>`;
+          }
+        }catch{
+          html = marked.parse(raw || '🤖 (no response)');
+        }
+      }
+
+      replaceTyping(typingRow, html);
+      setStatus('Ready');
+    }catch(err){
+      replaceTyping(typingRow, `<div>⚠️ ${escapeHtml(err.message)}</div>`);
+      setStatus('Error');
+      console.error(err);
+    }finally{
+      sendBtn.disabled = false;
+      // clear attachments only after attempt completes
+      pendingFiles.splice(0, pendingFiles.length);
+      renderPreviews();
+      userInput.focus();
+      updateComposerHeight(); // in case the bar height changed
+    }
+  }
+
+  // util
+  function escapeHtml(s){ return String(s)
+    .replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')
+    .replaceAll('"','&quot;').replaceAll("'","&#039;"); }
+  function escapeAttr(s){ return escapeHtml(s).replaceAll('`','&#096;'); }
+
+  // expose for form onsubmit
+  window.sendChat = sendChat;
+</script>
+</body>
+</html>
